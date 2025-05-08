@@ -1,0 +1,52 @@
+fixed_costs:
+  Hardware (5 Laptops): 17500
+  SOC 2 Readiness Platform: 5000
+  Conferences & Events (Initial Plan): 5000
+  Branding & Digital Presence (Initial Plan): 2000
+  Legal - Initial Setup (MSA, Trademark): 7000
+  Accounting - Tax Prep (1x): 1500
+  Accounting - Frac CFO (Initial Consult): 1000
+
+monthly_costs:
+  Founder Salary - Michael: 10000
+  Founder Salary - Saransh: 10000
+  Founder Salary - Tom: 10000
+  Engineer Salary - 1: 9000  # Plus equity grant, below top market cash comp
+  Engineer Salary - 2: 9000  # Plus equity grant, below top market cash comp
+  Payroll Taxes (~10%): 4800  # Employer-paid portion (FICA, SUI, Medicare, WC est. for WA)
+  Coworking/Flex Office: 500
+  GL Insurance: 50
+  Office Supplies: 50
+  Cloud Hosting (Avg): 500      # General app hosting, DBs, dev/test env
+  AI Inference (Avg for Pilots): 2000 # Dedicated GPU/API costs for AI model serving for pilots
+  Other Dev Tech Tools (Avg): 100 # e.g., GitHub Pro, Sentry, Raygun
+  Slack: 40
+  Notion: 50
+  Google Workspace: 30
+  Figma: 30
+  HubSpot CRM: 20
+  Gusto Payroll: 80
+  QuickBooks Accounting: 50
+  1Password Teams: 35
+  Misc IT/Security SaaS (Avg): 50 # e.g., VPN, specific compliance tools
+  Legal - Ad Hoc Retainer (Avg): 0
+  E&O Insurance (Avg): 167 # Tech E&O ($~2k/yr), review at scale
+  Misc Admin (Avg): 67
+
+optional_costs:
+  D&O Insurance (Annual):
+    cost_type: annual
+    cost_value: 5000
+    category: Professional Services & Admin
+  Health Benefits Stipend (5ppl @ $300/mo each):
+    cost_type: monthly
+    cost_value: 1500
+    category: Personnel Costs
+  Full SOC 2 Type I Audit:
+    cost_type: one_time
+    cost_value: 7500
+    category: Product Dev & Tech Infrastructure
+  Increased Conference Budget:
+    cost_type: one_time
+    cost_value: 5000
+    category: Go-to-Market (Sales & Marketing) 

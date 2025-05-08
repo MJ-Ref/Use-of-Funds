@@ -2,75 +2,80 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 from collections import OrderedDict
+from pathlib import Path
+import yaml
+from pydantic import BaseModel, ValidationError, field_validator
 
-# --- Core Budget Data (Based on validated $1.2M plan for 15 months) ---
-# This will be our baseline and source of truth for calculations
-
+# --- Constants
 INITIAL_RUNWAY_MONTHS = 15
 TARGET_RAISE_USD = 1_200_000
 
-# Define costs that are ONE-TIME or FIXED for the initial 15-month plan
-fixed_costs_details = {
-    "Hardware (5 Laptops)": 17_500, # CapEx
-    "SOC 2 Readiness Platform": 5_000,
-    "Conferences & Events (Initial Plan)": 5_000,
-    "Branding & Digital Presence (Initial Plan)": 2_000,
-    "Legal - Initial Setup (MSA, Trademark)": 7_000,  # Includes minimal ad-hoc counsel
-    "Accounting - Tax Prep (1x)": 1_500,
-    "Accounting - Frac CFO (Initial Consult)": 1_000,
-}
+# --- Budget Data Ingestion & Validation -------------------------------------------------
 
-# Define costs that are MONTHLY
-monthly_costs_details = {
-    "Salaries (5 Founders)": 50_000,
-    "Payroll Taxes (~10%)": 5_000, # 10% of $50k salaries
-    "Coworking/Flex Office": 500,
-    "GL Insurance": 50, # $750 / 15mo
-    "Office Supplies": 50, # $750 / 15mo
-    "Cloud Hosting (Avg)": 500, # ($7500 cloud / 15mo)
-    "AI Inference (Avg for Pilots)": 67, # ($1000 AI / 15mo), rounded
-    "Other Dev Tech Tools (Avg)": 100, # ($1500 / 15mo)
-    "Slack": 40,
-    "Notion": 50,
-    "Google Workspace": 30,
-    "Figma": 30,
-    "HubSpot CRM": 20,
-    "Gusto Payroll": 80,
-    "QuickBooks Accounting": 50,
-    "1Password Teams": 35,
-    "Misc IT/Security SaaS (Avg)": 50, # ($750 / 15mo)
-    "Legal - Ad Hoc Retainer (Avg)": 0,  # Consolidated into $7k fixed legal budget
-    "E&O Insurance (Avg)": 83, # ($1250 / 15mo), rounded
-    "Misc Admin (Avg)": 67, # ($1000 misc admin / 15mo), rounded
-}
+class OptionalCostModel(BaseModel):
+    cost_type: str
+    cost_value: float
+    category: str
 
-# Software tools list for categorization
-software_op_ex_monthly = ["Slack", "Notion", "Google Workspace", "Figma", "HubSpot CRM",
-                          "Gusto Payroll", "QuickBooks Accounting", "1Password Teams", "Misc IT/Security SaaS (Avg)"]
+    @field_validator("cost_type")
+    @classmethod
+    def validate_type(cls, v):
+        if v not in {"monthly", "annual", "one_time"}:
+            raise ValueError("cost_type must be 'monthly', 'annual', or 'one_time'")
+        return v
 
-# Define potential optional add-backs for scenario planning
-optional_add_back_costs = {
-    "D&O Insurance (Annual)": {
-        "cost_type": "annual", #will be scaled by runway years
-        "cost_value": 5_000,
-        "category": "Professional Services & Admin"
-    },
-    "Health Benefits Stipend (5ppl @ $300/mo each)": { # Lower cost than full insurance
-        "cost_type": "monthly",
-        "cost_value": 1_500, # 5 * 300
-        "category": "Personnel Costs"
-    },
-    "Full SOC 2 Type I Audit": {
-        "cost_type": "one_time",
-        "cost_value": 7_500, # Mid-point for Type I
-        "category": "Product Dev & Tech Infrastructure"
-    },
-    "Increased Conference Budget": {
-        "cost_type": "one_time", # Represents an additional fixed amount
-        "cost_value": 5_000,
-        "category": "Go-to-Market (Sales & Marketing)"
-    }
-}
+    @field_validator("cost_value")
+    @classmethod
+    def positive_value(cls, v):
+        if v < 0:
+            raise ValueError("cost_value must be positive")
+        return v
+
+class BudgetModel(BaseModel):
+    fixed_costs: dict[str, float]
+    monthly_costs: dict[str, float]
+    optional_costs: dict[str, OptionalCostModel]
+
+    @field_validator("fixed_costs", "monthly_costs")
+    @classmethod
+    def validate_amounts(cls, v):
+        for name, amt in v.items():
+            if amt < 0:
+                raise ValueError(f"{name} must have a positive amount")
+        return v
+
+# Locate YAML next to this script
+yaml_path = Path(__file__).with_name("budget_data.yaml")
+if not yaml_path.exists():
+    st.error("budget_data.yaml not found – cannot load budget.")
+    st.stop()
+
+with yaml_path.open("r") as f:
+    raw_budget = yaml.safe_load(f)
+
+try:
+    budget_data = BudgetModel(**raw_budget)
+except ValidationError as e:
+    st.error(f"Budget validation failed:\n{e}")
+    st.stop()
+
+# Expose validated dicts in the same variable names used downstream
+fixed_costs_details = budget_data.fixed_costs
+monthly_costs_details = budget_data.monthly_costs
+optional_add_back_costs = {k: v.model_dump() for k, v in budget_data.optional_costs.items()}
+
+# Software tools list for categorization (unchanged)
+software_op_ex_monthly = [
+    "Slack",
+    "Notion",
+    "Google Workspace",
+    "Figma",
+    "HubSpot CRM",
+    "Gusto Payroll",
+    "QuickBooks Accounting",
+    "1Password Teams",
+    "Misc IT/Security SaaS (Avg)",
+]
 
 def categorize_costs(monthly_costs_for_runway, fixed_costs_for_runway, added_optional_costs):
     """Helper to categorize costs for display and charting."""
@@ -82,9 +87,9 @@ def categorize_costs(monthly_costs_for_runway, fixed_costs_for_runway, added_opt
         ("Professional Services & Admin", 0)
     ])
 
-    # Assign monthly costs
-    categories["Personnel Costs"] += monthly_costs_for_runway.get("Salaries (5 Founders)", 0) + \
-                                    monthly_costs_for_runway.get("Payroll Taxes (~10%)", 0)
+    # Sum any salary-related keys dynamically
+    salary_total = sum(val for key, val in monthly_costs_for_runway.items() if "Salary" in key)
+    categories["Personnel Costs"] += salary_total + monthly_costs_for_runway.get("Payroll Taxes (~10%)", 0)
 
     categories["Product Dev & Tech Infrastructure"] += monthly_costs_for_runway.get("Cloud Hosting (Avg)", 0) + \
                                                       monthly_costs_for_runway.get("AI Inference (Avg for Pilots)", 0) + \
@@ -187,6 +192,36 @@ selected_optionals = {}
 for item_name in optional_add_back_costs.keys():
     selected_optionals[item_name] = st.sidebar.checkbox(f"Include {item_name}", value=False)
 
+# --- Advanced Cost Overrides -------------------------------------------------------
+with st.sidebar.expander("🛠️ Advanced: Adjust Individual Costs", expanded=False):
+    st.caption("Leave blank to keep default. All values in USD.")
+
+    # Editable monthly costs
+    if st.checkbox("Edit Monthly Costs", value=False):
+        for key in sorted(monthly_costs_details.keys()):
+            new_val = st.number_input(key, min_value=0, value=int(monthly_costs_details[key]), step=100, key=f"mc_{key}")
+            monthly_costs_details[key] = new_val
+
+    # Editable fixed costs
+    if st.checkbox("Edit Fixed / One-time Costs", value=False):
+        for key in sorted(fixed_costs_details.keys()):
+            new_val = st.number_input(key, min_value=0, value=int(fixed_costs_details[key]), step=100, key=f"fc_{key}")
+            fixed_costs_details[key] = new_val
+
+    st.markdown("---")
+    st.markdown("**➕ Add New Monthly Cost**")
+    new_monthly_name = st.text_input("Name", key="new_monthly_name")
+    new_monthly_amt = st.number_input("Amount (USD)", min_value=0, step=100, key="new_monthly_amt")
+    if st.button("Add Monthly Cost"):
+        if new_monthly_name and new_monthly_amt > 0:
+            monthly_costs_details[new_monthly_name] = int(new_monthly_amt)
+
+    st.markdown("**➕ Add New Fixed Cost**")
+    new_fixed_name = st.text_input("Name ", key="new_fixed_name")
+    new_fixed_amt = st.number_input("Amount (USD) ", min_value=0, step=100, key="new_fixed_amt")
+    if st.button("Add Fixed Cost"):
+        if new_fixed_name and new_fixed_amt > 0:
+            fixed_costs_details[new_fixed_name] = int(new_fixed_amt)
 
 # --- Calculations based on controls ---
 calculated_core_spend, categorized_spend, monthly_spend_total_for_runway, fixed_spend_total_for_runway, optional_spend_total, added_optional_costs_for_display = calculate_total_spend(runway_months_slider, selected_optionals)
@@ -247,10 +282,10 @@ st.info(f"The following breakdown is for the selected {runway_months_slider}-mon
 
 with st.expander("Personnel Costs", expanded=False):
     st.metric("Total Personnel Costs", f"${categorized_spend.get('Personnel Costs', 0):,.0f}")
-    salary_val = monthly_costs_details["Salaries (5 Founders)"] * runway_months_slider
-    payroll_val = monthly_costs_details["Payroll Taxes (~10%)"] * runway_months_slider
-    st.write(f"- Salaries (5 Founders): ${salary_val:,.0f}")
-    st.write(f"- Payroll Taxes & Basic Overhead (~10%): ${payroll_val:,.0f}")
+    # Break down salaries dynamically
+    for key in sorted([k for k in monthly_costs_details if "Salary" in k]):
+        st.write(f"- {key}: ${monthly_costs_details[key] * runway_months_slider:,.0f}")
+    st.write(f"- Payroll Taxes & Basic Overhead (~10%): ${monthly_costs_details['Payroll Taxes (~10%)']*runway_months_slider:,.0f}")
     if selected_optionals.get("Health Benefits Stipend (5ppl @ $300/mo each)", False):
         health_cost = optional_add_back_costs["Health Benefits Stipend (5ppl @ $300/mo each)"]["cost_value"] * runway_months_slider
         st.write(f"- *Optional: Health Benefits Stipend:* ${health_cost:,.0f}")
@@ -315,7 +350,7 @@ col_m, col_a = st.columns(2)
 with col_m:
     st.subheader("Key Milestones (with this Funding)")
     st.markdown(f"""
-    *   **Product MVP Launch ({runway_months_slider} mo target):** Core AI screening, contextual role definition, foundational analytics.
+    *   **Beachhead Product Launch ({runway_months_slider} mo target):** Core AI screening, contextual role definition, foundational analytics.
     *   **Enterprise Pilot Customers (1-2 Clients):** Onboard and validate with initial paying customers.
     *   **SOC 2 Readiness:** Essential policies, procedures, and controls implemented.
     *   **Iterated Product & GTM Strategy:** Refined based on pilot feedback.
@@ -324,8 +359,8 @@ with col_m:
 with col_a:
     st.subheader("Core Assumptions")
     st.markdown(f"""
-    *   **Team:** 5 core founders, no new hires in this phase (unless toggled as optional scenario).
-    *   **Salaries:** $10k/month per founder.
+    *   **Team:** 3 founders & 2 early engineers (total 5 FTE), no additional hires in this phase (unless toggled in scenario settings).
+    *   **Salaries:** $10k/month per founder • $9k/month per engineer (plus equity grants).
     *   **Location:** Seattle-based (lean office/remote focus).
     *   **Health Benefits:** Deferred (unless stipend toggled as optional).
     *   **Marketing:** Highly targeted, low-cost initiatives.
